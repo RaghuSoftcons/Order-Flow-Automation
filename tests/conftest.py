@@ -29,6 +29,7 @@ from orderflow_api import cache as cache_module
 from orderflow_api.config import get_settings
 from orderflow_api.db import Base
 from orderflow_api.main import create_app
+from orderflow_api.services import registry as registry_module
 
 
 @pytest.fixture(autouse=True)
@@ -82,8 +83,16 @@ def fresh_cache(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture
-def client(in_memory_engine, fresh_cache) -> Iterator[TestClient]:
-    """FastAPI TestClient with isolated DB + cache."""
+def fresh_registry() -> Iterator[None]:
+    """Fresh OrderBookRegistry per test."""
+    registry_module.reset_registry_for_tests()
+    yield
+    registry_module.reset_registry_for_tests()
+
+
+@pytest.fixture
+def client(in_memory_engine, fresh_cache, fresh_registry) -> Iterator[TestClient]:
+    """FastAPI TestClient with isolated DB + cache + registry."""
     app = create_app()
     with TestClient(app) as test_client:
         yield test_client
