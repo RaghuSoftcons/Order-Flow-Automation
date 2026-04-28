@@ -19,6 +19,11 @@
 //   2026-04-26 20:00 EST | 1.0.1 | Fix CS0305 compile error: NT8 does not
 //     expose a `MarketDepth` accessor on Indicator. Maintain local DOM
 //     (SortedDictionary per side) by accumulating OnMarketDepth events.
+//   2026-04-28 16:30 EST | 1.0.2 | Fix CS0117 (Operation.Insert -> Add) and
+//     CS0111/CS0102/CS0121/CS0229 duplicate-member errors caused by NT
+//     auto-appending its own generated boilerplate on top of ours. Removed
+//     the manual `#region NinjaScript generated code` block; NT will
+//     regenerate it automatically on first compile inside the NT editor.
 //
 // CONFIGURATION
 //   Reads JSON from:
@@ -181,21 +186,33 @@ namespace NinjaTrader.NinjaScript.Indicators
             // NT fires per-level deltas. We accumulate into _localBids/_localAsks
             // and let the snapshot timer flush the current top N at most once per
             // snapshot_interval_ms (NT can fire hundreds of these per second).
+            //
+            // NT8 Cbi.Operation enum values are: Add, Update, Remove.
+            // Book resets are signalled via e.IsReset (not as an Operation value).
             try
             {
+                if (e.IsReset)
+                {
+                    lock (_domLock)
+                    {
+                        _localBids.Clear();
+                        _localAsks.Clear();
+                    }
+                    Interlocked.Exchange(ref _depthDirty, 1);
+                    return;
+                }
+
                 var dom = e.MarketDataType == MarketDataType.Bid ? _localBids : _localAsks;
                 lock (_domLock)
                 {
-                    switch (e.Operation)
+                    if (e.Operation == Cbi.Operation.Add || e.Operation == Cbi.Operation.Update)
                     {
-                        case Operation.Insert:
-                        case Operation.Update:
-                            if (e.Volume > 0) dom[e.Price] = (long)e.Volume;
-                            else dom.Remove(e.Price);
-                            break;
-                        case Operation.Remove:
-                            dom.Remove(e.Price);
-                            break;
+                        if (e.Volume > 0) dom[e.Price] = (long)e.Volume;
+                        else dom.Remove(e.Price);
+                    }
+                    else if (e.Operation == Cbi.Operation.Remove)
+                    {
+                        dom.Remove(e.Price);
                     }
                 }
                 Interlocked.Exchange(ref _depthDirty, 1);
@@ -403,59 +420,9 @@ namespace NinjaTrader.NinjaScript.Indicators
     }
 }
 
-#region NinjaScript generated code. Neither change nor remove.
-
-namespace NinjaTrader.NinjaScript.Indicators
-{
-    public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
-    {
-        private OrderFlowBridge_Claude_V1[] cacheOrderFlowBridge_Claude_V1;
-        public OrderFlowBridge_Claude_V1 OrderFlowBridge_Claude_V1()
-        {
-            return OrderFlowBridge_Claude_V1(Input);
-        }
-
-        public OrderFlowBridge_Claude_V1 OrderFlowBridge_Claude_V1(ISeries<double> input)
-        {
-            if (cacheOrderFlowBridge_Claude_V1 != null)
-                for (int idx = 0; idx < cacheOrderFlowBridge_Claude_V1.Length; idx++)
-                    if (cacheOrderFlowBridge_Claude_V1[idx] != null && cacheOrderFlowBridge_Claude_V1[idx].EqualsInput(input))
-                        return cacheOrderFlowBridge_Claude_V1[idx];
-            return CacheIndicator<OrderFlowBridge_Claude_V1>(new OrderFlowBridge_Claude_V1(), input, ref cacheOrderFlowBridge_Claude_V1);
-        }
-    }
-}
-
-namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
-{
-    public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
-    {
-        public Indicators.OrderFlowBridge_Claude_V1 OrderFlowBridge_Claude_V1()
-        {
-            return indicator.OrderFlowBridge_Claude_V1(Input);
-        }
-
-        public Indicators.OrderFlowBridge_Claude_V1 OrderFlowBridge_Claude_V1(ISeries<double> input )
-        {
-            return indicator.OrderFlowBridge_Claude_V1(input);
-        }
-    }
-}
-
-namespace NinjaTrader.NinjaScript.Strategies
-{
-    public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
-    {
-        public Indicators.OrderFlowBridge_Claude_V1 OrderFlowBridge_Claude_V1()
-        {
-            return indicator.OrderFlowBridge_Claude_V1(Input);
-        }
-
-        public Indicators.OrderFlowBridge_Claude_V1 OrderFlowBridge_Claude_V1(ISeries<double> input )
-        {
-            return indicator.OrderFlowBridge_Claude_V1(input);
-        }
-    }
-}
-
-#endregion
+// NinjaTrader will auto-generate the
+// `#region NinjaScript generated code. Neither change nor remove.` block
+// the first time this file is opened/compiled inside the NT NinjaScript
+// editor. We intentionally do NOT include it manually here, because if our
+// version doesn't byte-match what NT expects, NT appends a second copy and
+// every member becomes a duplicate (CS0102 / CS0111 / CS0121 / CS0229).
