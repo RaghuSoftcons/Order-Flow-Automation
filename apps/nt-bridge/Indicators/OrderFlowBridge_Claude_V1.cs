@@ -16,6 +16,9 @@
 //   2026-04-26 19:10 EST | 1.0.0 | Phase 1D initial: WebSocket bridge with
 //     throttled depth snapshots, immediate trade events, config from JSON,
 //     auto-reconnect, ConcurrentQueue outbox.
+//   2026-04-26 20:00 EST | 1.0.1 | Fix CS0305 compile error: NT8 does not
+//     expose a `MarketDepth` accessor on Indicator. Maintain local DOM
+//     (SortedDictionary per side) by accumulating OnMarketDepth events.
 //
 // CONFIGURATION
 //   Reads JSON from:
@@ -38,9 +41,11 @@
 #region Using declarations
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.IO;
+using System.Linq;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
@@ -87,6 +92,14 @@ namespace NinjaTrader.NinjaScript.Indicators
         // ---------- Symbol metadata ----------
         private string _symbolRoot;    // "ES"
         private string _contractName;  // "ES 06-26"
+
+        // ---------- Local DOM (maintained from OnMarketDepth events) ----------
+        // SortedDictionary keyed by price. Bid and ask are separate.
+        // We read these from a single thread (the snapshot timer), so a simple
+        // lock is enough. Two dicts keep insert/update/remove O(log N).
+        private readonly SortedDictionary<double, long> _localBids = new SortedDictionary<double, long>();
+        private readonly SortedDictionary<double, long> _localAsks = new SortedDictionary<double, long>();
+        private readonly object _domLock = new object();
 
         protected override void OnStateChange()
         {
@@ -165,9 +178,32 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         protected override void OnMarketDepth(MarketDepthEventArgs e)
         {
-            // Mark book dirty; the snapshot timer flushes the current state at most once per
-            // snapshot_interval_ms. NT fires hundreds of these per second on active books.
-            Interlocked.Exchange(ref _depthDirty, 1);
+            // NT fires per-level deltas. We accumulate into _localBids/_localAsks
+            // and let the snapshot timer flush the current top N at most once per
+            // snapshot_interval_ms (NT can fire hundreds of these per second).
+            try
+            {
+                var dom = e.MarketDataType == MarketDataType.Bid ? _localBids : _localAsks;
+                lock (_domLock)
+                {
+                    switch (e.Operation)
+                    {
+                        case Operation.Insert:
+                        case Operation.Update:
+                            if (e.Volume > 0) dom[e.Price] = (long)e.Volume;
+                            else dom.Remove(e.Price);
+                            break;
+                        case Operation.Remove:
+                            dom.Remove(e.Price);
+                            break;
+                    }
+                }
+                Interlocked.Exchange(ref _depthDirty, 1);
+            }
+            catch (Exception ex)
+            {
+                Print("[OrderFlowBridge] OnMarketDepth exception: " + ex.Message);
+            }
         }
 
         // ---------- Snapshot timer ----------
@@ -177,24 +213,27 @@ namespace NinjaTrader.NinjaScript.Indicators
             try
             {
                 if (Interlocked.Exchange(ref _depthDirty, 0) == 0) return;
-                if (MarketDepth == null) return;
 
-                var depthCol = MarketDepth;
-                int levels = Math.Min(_config.MaxLevels, depthCol.BidLevels.Count);
-                int alevels = Math.Min(_config.MaxLevels, depthCol.AskLevels.Count);
+                List<object> bids;
+                List<object> asks;
+                int maxLevels = _config.MaxLevels;
 
-                var bids = new System.Collections.Generic.List<object>(levels);
-                for (int i = 0; i < levels; i++)
+                lock (_domLock)
                 {
-                    var lvl = depthCol.BidLevels[i];
-                    bids.Add(new { price = lvl.Price, size = (int)lvl.Volume, orders = 0 });
+                    // Bids descending (highest price first); take top N
+                    bids = _localBids
+                        .Reverse()
+                        .Take(maxLevels)
+                        .Select(kv => (object)new { price = kv.Key, size = (int)kv.Value, orders = 0 })
+                        .ToList();
+                    // Asks ascending (lowest price first); take top N
+                    asks = _localAsks
+                        .Take(maxLevels)
+                        .Select(kv => (object)new { price = kv.Key, size = (int)kv.Value, orders = 0 })
+                        .ToList();
                 }
-                var asks = new System.Collections.Generic.List<object>(alevels);
-                for (int i = 0; i < alevels; i++)
-                {
-                    var lvl = depthCol.AskLevels[i];
-                    asks.Add(new { price = lvl.Price, size = (int)lvl.Volume, orders = 0 });
-                }
+
+                if (bids.Count == 0 && asks.Count == 0) return;
 
                 var json = JsonConvert.SerializeObject(new
                 {
