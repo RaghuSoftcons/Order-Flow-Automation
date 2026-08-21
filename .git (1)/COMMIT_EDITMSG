@@ -1,0 +1,19 @@
+Phase 1D fix v2: NT8 Operation enum + auto-generated block conflict
+
+Two compile blockers from Round 01 errors CSV:
+
+1. CS0117: 'Operation' has no 'Insert' — NT8's Cbi.Operation enum is
+   {Add, Update, Remove}, with resets signalled by e.IsReset (not as an
+   Operation value). Aligned to NT's own SuperDomColumns example
+   (@PullingStacking.cs).
+
+2. CS0102/CS0111/CS0121/CS0229 duplicate-member errors — NT auto-appends
+   its own '#region NinjaScript generated code' block when our manual
+   version doesn't byte-match what NT expects. File ended up with two
+   copies of every cache + factory method. Fix: remove our manual block
+   entirely and let NT generate it on first compile inside the editor.
+
+Replikanto CS1705 warnings in the CSV are from a third-party assembly
+unrelated to this file; ignored.
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>

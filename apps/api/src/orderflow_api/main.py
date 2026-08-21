@@ -23,7 +23,7 @@ from orderflow_api import __version__
 from orderflow_api.config import get_settings
 from orderflow_api.db import init_db
 from orderflow_api.logging import configure_logging, get_logger
-from orderflow_api.routers import feed, health, ingest, me, orderbook
+from orderflow_api.routers import bootstrap, feed, health, ingest, me, orderbook
 
 
 @asynccontextmanager
@@ -54,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(orderbook.router, tags=["orderbook"])
     app.include_router(feed.router, tags=["health"])
     app.include_router(ingest.router, tags=["ingest"])
+    app.include_router(bootstrap.router, tags=["admin"])
     return app
 
 

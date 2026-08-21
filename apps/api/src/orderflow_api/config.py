@@ -7,6 +7,7 @@ Last Modified: 2026-04-26 17:20 EST
 
 Change Log:
 - 2026-04-26 17:20 EST | 1.0.0 | Initial Phase 0 scaffold.
+- 2026-08-17 19:02 EST | 1.1.0 | Add BOOTSTRAP_TOKEN (one-time admin seed).
 
 App settings sourced from environment variables (via pydantic-settings).
 Local dev uses .env file; Railway uses platform env vars.
@@ -50,6 +51,15 @@ class Settings(BaseSettings):
     )
 
     anthropic_api_key: str = Field(default="", description="Set in Railway Variables.")
+
+    bootstrap_token: str = Field(
+        default="",
+        description=(
+            "One-time admin seed token. When non-empty, POST /admin/bootstrap "
+            "with header X-Bootstrap-Token: <this value> seeds users and returns "
+            "their API keys once. Clear this env var after bootstrapping."
+        ),
+    )
 
     # Phase 4 — populated when wiring Schwab integration
     schwab_client_id: str = ""
