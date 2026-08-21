@@ -48,3 +48,8 @@ logs/
 
 # Schwab integration token store (per existing convention)
 schwab_tokens.json
+
+# Google Drive sometimes creates numbered duplicates of folders on conflict
+.git (*)/
+* (1)/
+* (2)/
